@@ -89,7 +89,10 @@ cmd_deploy() {
     docker exec frr-tor vtysh -c 'show bgp summary' >/dev/null 2>&1 || die "FRR bgpd did not come up"
 
     log "applying stock tigera-operator manifest ($OPERATOR_MANIFEST_URL)"
-    kubectl apply -f "$OPERATOR_MANIFEST_URL" >/dev/null
+    case "$OPERATOR_MANIFEST_URL" in
+        file://*) kubectl apply -f "${OPERATOR_MANIFEST_URL#file://}" >/dev/null ;;
+        *)        kubectl apply -f "$OPERATOR_MANIFEST_URL" >/dev/null ;;
+    esac
     log "waiting for the calico CRDs to be established"
     for _ in $(seq 1 60); do
         kubectl get crd installations.operator.tigera.io >/dev/null 2>&1 && break

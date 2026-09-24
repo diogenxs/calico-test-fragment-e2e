@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [v3.29.7, v3.31.7, v3.32.2, master]
+        version: [v3.30.7, v3.31.7, v3.32.2, master]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -78,7 +78,13 @@ jobs:
       - name: Run the e2e against calico ${{ matrix.version }}
         run: |
           if [ "${{ matrix.version }}" = "master" ]; then
-            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/master/manifests/tigera-operator.yaml"
+            # master's tigera-operator.yaml ships without the CRDs (they live
+            # in manifests/operator/*.yaml there); concat operator + CRDs.
+            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/tigera-operator.yaml" -o /tmp/op.yaml
+            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/operator/crds.yaml" -o /tmp/crds.yaml || \
+            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/crds.yaml" -o /tmp/crds.yaml || true
+            cat /tmp/op.yaml /tmp/crds.yaml > /tmp/master-bundle.yaml
+            export OPERATOR_MANIFEST_URL="file:///tmp/master-bundle.yaml"
           else
             export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${{ matrix.version }}/manifests/tigera-operator.yaml"
           fi

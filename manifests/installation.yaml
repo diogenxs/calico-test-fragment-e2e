@@ -1,0 +1,36 @@
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    # BPF dataplane — required: the bug lives in felix's tc BPF programs on
+    # the pod veths (FROM_WEP). Iptables dataplane never exercises it.
+    linuxDataplane: BPF
+    bgp: Enabled
+    ipPools:
+      - cidr: 10.42.0.0/16
+        blockSize: 24
+        encapsulation: None
+  variant: Calico
+---
+apiVersion: crd.projectcalico.org/v1
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  asNumber: 65001
+  nodeToNodeMeshEnabled: false
+  serviceClusterIPs:
+    - cidr: 10.43.0.0/16
+  # mesh disabled: routes are exchanged ONLY via the external FRR
+  # "top-of-rack" container — mirrors the fabric-driven routing of real
+  # deployments where node-to-node paths transit the ToR.
+---
+apiVersion: crd.projectcalico.org/v1
+kind: BGPPeer
+metadata:
+  name: frr-tor
+spec:
+  peerIP: ""   # patched to the FRR container IP at deploy time
+  asNumber: 65001

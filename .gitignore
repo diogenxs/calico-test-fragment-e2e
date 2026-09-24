@@ -1,0 +1,4 @@
+# local run state — never commit
+tmp/
+# macOS noise
+.DS_Store

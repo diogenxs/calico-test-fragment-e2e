@@ -1,0 +1,71 @@
+name: fragment-e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      candidate_image:
+        description: "calico/node image ref to verify a fix (expects FIX VERIFIED)"
+        required: false
+        default: ""
+      expect:
+        description: "Expected verdict: reproduced | verified"
+        required: false
+        default: ""
+
+jobs:
+  repro:
+    name: stock calico (expect BUG REPRODUCED)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ !github.event.inputs.candidate_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      - name: Run the e2e
+        run: |
+          bash scripts/run-e2e.sh all
+      - name: Verdict must be BUG REPRODUCED
+        run: |
+          V=$(python3 evidence/analyze.py --dir tmp/evidence | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])')
+          echo "verdict: $V"
+          [ "$V" = "BUG REPRODUCED" ] || { echo "::error::expected BUG REPRODUCED, got $V"; exit 1; }
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-stock
+          path: tmp/evidence/
+
+  candidate:
+    name: candidate image (expect FIX VERIFIED)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event.inputs.candidate_image != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      - name: Run the e2e against ${{ github.event.inputs.candidate_image }}
+        run: |
+          CALICO_NODE_IMAGE='${{ github.event.inputs.candidate_image }}' bash scripts/run-e2e.sh all
+      - name: Verdict must be FIX VERIFIED
+        run: |
+          V=$(python3 evidence/analyze.py --dir tmp/evidence | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])')
+          echo "verdict: $V"
+          [ "$V" = "FIX VERIFIED" ] || { echo "::error::expected FIX VERIFIED, got $V"; exit 1; }
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-candidate
+          path: tmp/evidence/

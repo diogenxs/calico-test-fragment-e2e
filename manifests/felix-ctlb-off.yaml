@@ -1,0 +1,12 @@
+# FelixConfiguration: disable BPF connect-time load balancing.
+#
+# Test-only deviation, NOT part of the bug: runner/container kernels can
+# reject the CTLB attach (tc/ctlg program), which kills calico-node startup.
+# CTLB is irrelevant to the fragment path under test (host-node probing is
+# out of scope), so it stays off here.
+apiVersion: crd.projectcalico.org/v1
+kind: FelixConfiguration
+metadata:
+  name: default
+spec:
+  bpfConnectTimeLoadBalancingEnabled: false

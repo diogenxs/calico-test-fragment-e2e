@@ -1,0 +1,39 @@
+# Probe workloads: source/sink on DISTINCT worker nodes so the cross-node
+# path (pod veth -> host BPF -> external ToR -> peer node) is in play.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frag-src
+  namespace: default
+  labels:
+    app: frag-probe
+spec:
+  # nodeName is injected at deploy time (run-e2e.sh cmd_probes): k3s agents
+  # carry no role labels, so a label selector cannot target them portably.
+  nodeName: PLACEHOLDER
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:latest
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "infinity"]
+      securityContext:
+        capabilities:
+          add: ["NET_RAW", "NET_ADMIN"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frag-sink
+  namespace: default
+  labels:
+    app: frag-probe
+spec:
+  nodeName: PLACEHOLDER
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:latest
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "infinity"]
+      securityContext:
+        capabilities:
+          add: ["NET_RAW", "NET_ADMIN"]

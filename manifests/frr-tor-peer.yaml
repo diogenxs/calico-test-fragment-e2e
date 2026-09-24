@@ -1,0 +1,15 @@
+# Top-of-rack mimic: FRR container runs on the SAME docker network as the k3d
+# node containers (k3d-network). BGP peers each node ↔ ToR; calico advertises
+# its IPAM blocks, the ToR re-advertises them — node-to-node pod traffic
+# transits the ToR exactly like a fabric deployment.
+#
+# The neighbor statements for the node IPs are added at deploy time by
+# scripts/run-e2e.sh (docker exec vtysh), since node container IPs are dynamic.
+apiVersion: crd.projectcalico.org/v1
+kind: BGPPeer
+metadata:
+  name: frr-tor
+spec:
+  peerIP: "0.0.0.0"
+  asNumber: 65001
+  # sourceIP / node selectors not needed — single peer for all nodes

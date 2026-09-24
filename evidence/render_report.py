@@ -166,6 +166,18 @@ L.append("- **CNI guards**: no flannel links on the node; the sink pod's IP "
 L.append("- **ICMP raw sweep**: also runs (advisory): on stock BPF, raw-ICMP "
          "replies to workloads are policy-dropped, so that layer can't separate "
          "bug from noise — UDP is the authoritative signal")
+tcp_rows = report.get("tcp_control") or []
+if tcp_rows:
+    tcp_all_ok = all(r.get("ok") for r in tcp_rows)
+    mbps = [r.get("mbps") for r in tcp_rows if r.get("mbps") is not None]
+    L.append("- **TCP negative control**: %s — TCP streams a full transfer "
+             "(byte-exact SHA256 verification) and MUST be unaffected: MSS "
+             "negotiation keeps every segment below the path MTU, so TCP never "
+             "fragments and never lands in the 1–7-byte-tail band%s. A TCP "
+             "failure would mean the path itself is broken, invalidating the "
+             "UDP band result." % (
+                 "unaffected ✅" if tcp_all_ok else "AFFECTED ❌",
+                 " (%s MB/s)" % "/".join(str(m) for m in mbps) if mbps else ""))
 L.append("")
 L.append("## Raw files in this artifact")
 L.append("")
@@ -175,6 +187,7 @@ L.append("| `REPORT.md` | this file |")
 L.append("| `report.json` | machine-readable verdict + all rows |")
 L.append("| `udp-sweep.jsonl` / `udp-sweep-rev.jsonl` | per-size UDP echo results (SHA256 payload, byte-exact check) |")
 L.append("| `icmp-sweep.jsonl` / `icmp-sweep-rev.jsonl` | per-size raw ICMP echo results (advisory) |")
+L.append("| `tcp-control.jsonl` | TCP negative-control transfer results (MSS keeps TCP out of fragment territory — must pass) |")
 L.append("| `df-control.txt` | DF-at-MTU control results |")
 L.append("| `capture.txt` / `capture-sample.txt` | tcpdump fragment capture count + sample |")
 L.append("| `felix-counters.txt` | felix too-short counter before/after |")

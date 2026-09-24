@@ -87,9 +87,30 @@ log "UDP echo integrity sweep (payload SHA256)"
 # stagger ports so the reverse sweep can't hit a stale socket
 kubectl cp "$REPO_ROOT/probes/udp_echo_server.py" frag-sink:/udp_echo_server.py >/dev/null
 kubectl cp "$REPO_ROOT/probes/udp_echo_server.py" "$POD:/udp_echo_server.py" >/dev/null
+kubectl cp "$REPO_ROOT/probes/tcp_server.py" frag-sink:/tcp_server.py >/dev/null
+kubectl cp "$REPO_ROOT/probes/tcp_server.py" "$POD:/tcp_server.py" >/dev/null
+kubectl cp "$REPO_ROOT/probes/tcp_client.py" "$POD:/tcp_client.py" >/dev/null
+kubectl cp "$REPO_ROOT/probes/tcp_client.py" frag-sink:/tcp_client.py >/dev/null
+kubectl exec frag-sink -- sh -c 'nohup python3 /tcp_server.py --port 37001 >/dev/null 2>&1 &' || true
+kubectl exec "$POD" -- sh -c 'nohup python3 /tcp_server.py --port 37001 >/dev/null 2>&1 &' || true
 kubectl exec frag-sink -- sh -c 'nohup python3 /udp_echo_server.py --port 37000 >/dev/null 2>&1 &' || true
 kubectl exec "$POD" -- sh -c 'nohup python3 /udp_echo_server.py --port 37000 >/dev/null 2>&1 &' || true
 sleep 2
+
+# ------------------------------------------------ layer 3b: TCP negative control
+# TCP must be UNAFFECTED: MSS negotiation keeps every segment below the path
+# MTU, so TCP never fragments and never produces a 1-7-byte-tail fragment.
+# A failure here means something ELSE is broken (path/MTU/policy), which
+# invalidates the UDP band result — the analyzer treats it that way.
+# 1MiB per direction = ~700+ segments: plenty of coverage without tripping
+# kernel GSO/GRO merge stalls seen with very large single-stream transfers
+# on k3d veths (unrelated to the fragment path).
+log "TCP transfer integrity (negative control, 1MiB both directions)"
+SRC_IP="$(kubectl get pod frag-src -o jsonpath='{.status.podIP}')"
+kubectl exec "$POD" -- python3 /tcp_client.py "$SINK_IP" --bytes 1048576 >> "$EV/tcp-control.jsonl" 2>/dev/null || \
+    echo '{"ok": false, "error": "client failed"}' >> "$EV/tcp-control.jsonl"
+kubectl exec frag-sink -- python3 /tcp_client.py "$SRC_IP" --bytes 1048576 >> "$EV/tcp-control.jsonl" 2>/dev/null || \
+    echo '{"ok": false, "error": "client failed"}' >> "$EV/tcp-control.jsonl"
 kubectl exec "$POD" -- python3 /udp_echo_sweep.py "$SINK_IP" --sizes "$SIZES" \
     > "$EV/udp-sweep.jsonl" 2>/dev/null || true
 # reverse direction: sink -> src

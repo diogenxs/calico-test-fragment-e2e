@@ -40,7 +40,9 @@ def jlines(name):
             r = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if "size" in r:  # summary lines carry passed/total instead
+        # per-size rows carry "size"; TCP control rows carry "bytes";
+        # UDP summary lines carry passed/total only and are skipped
+        if "size" in r or "bytes" in r:
             out.append(r)
     return out
 
@@ -67,6 +69,7 @@ icmp_fwd = jlines("icmp-sweep.jsonl")
 icmp_rev = jlines("icmp-sweep-rev.jsonl")
 udp_fwd = jlines("udp-sweep.jsonl")
 udp_rev = jlines("udp-sweep-rev.jsonl")
+tcp_rows = jlines("tcp-control.jsonl")
 
 report = {
     "df_control": df,
@@ -76,6 +79,11 @@ report = {
     "icmp_rev": [(r["size"], r["ok"]) for r in icmp_rev],
     "udp_fwd": [(r["size"], r["ok"]) for r in udp_fwd],
     "udp_rev": [(r["size"], r["ok"]) for r in udp_rev],
+    "tcp_control": [
+        {"bytes": r.get("bytes"), "ok": r.get("ok", False),
+         "mbps": r.get("mbps"), "error": r.get("error")}
+        for r in tcp_rows
+    ],
 }
 
 
@@ -101,6 +109,14 @@ rev_sizes = {r["size"] for r in icmp_rev}
 # deny raw ICMP replies); UDP is the authoritative layer. Only require rows.
 if not udp_fwd and not udp_rev:
     problems.append("UDP sweeps produced no rows — authoritative layer empty")
+# TCP negative control: failure invalidates the environment, not the verdict
+# evidence — TCP cannot fragment on this path, so a TCP failure means the
+# path itself is broken.
+if len(tcp_rows) < 2:
+    problems.append("TCP control produced %d rows (expected 2)" % len(tcp_rows))
+elif not all(r.get("ok") for r in tcp_rows):
+    problems.append("TCP negative control FAILED — path itself is broken; "
+                    "UDP band results cannot be attributed to the fragment bug")
 if len(fwd_sizes) != len(set(report["icmp_fwd"] and [s for s, _ in report["icmp_fwd"]])) or len(icmp_fwd) < 5:
     problems.append("ICMP forward sweep missing sizes (got %d rows)" % len(icmp_fwd))
 if len(icmp_rev) < 5:

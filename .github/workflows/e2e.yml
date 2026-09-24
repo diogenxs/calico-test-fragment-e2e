@@ -7,19 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       candidate_image:
-        description: "calico/node image ref to verify a fix (expects FIX VERIFIED)"
-        required: false
-        default: ""
-      expect:
-        description: "Expected verdict: reproduced | verified"
+        description: "calico/node image ref to verify a fix (expects FIX VERIFIED, green)"
         required: false
         default: ""
 
 jobs:
-  repro:
-    name: stock calico (expect BUG REPRODUCED)
+  stock:
+    name: stock calico fragment e2e
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # RED while the bug reproduces — the public tracker of the bug. Turns
+    # green when a stock image under test delivers the failure band (fix
+    # landed upstream). Read the summary before treating red as a harness
+    # regression.
     if: ${{ !github.event.inputs.candidate_image }}
     steps:
       - uses: actions/checkout@v4
@@ -29,13 +29,27 @@ jobs:
       - name: Install k3d
         run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
       - name: Run the e2e
-        run: |
-          bash scripts/run-e2e.sh all
-      - name: Verdict must be BUG REPRODUCED
+        run: bash scripts/run-e2e.sh all
+      - name: Render the evidence report
+        if: always()
+        run: python3 evidence/render_report.py --dir tmp/evidence
+      - name: Write job summary
+        if: always()
+        run: cat tmp/evidence/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Verdict gate — RED while the bug reproduces
         run: |
           V=$(python3 evidence/analyze.py --dir tmp/evidence | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])')
           echo "verdict: $V"
-          [ "$V" = "BUG REPRODUCED" ] || { echo "::error::expected BUG REPRODUCED, got $V"; exit 1; }
+          if [ "$V" = "BUG REPRODUCED" ]; then
+            echo "::error::BUG REPRODUCED — stock Calico BPF still drops 1-7-byte-tail IPv4 fragments. This check stays red until a stock image delivers the full band. Full evidence: summary + artifacts."
+            exit 1
+          fi
+          if [ "$V" = "FIX VERIFIED" ]; then
+            echo "::notice::FIX VERIFIED — stock image delivered the failure band byte-exact; the bug is no longer reproducible. Time to retire this check."
+            exit 0
+          fi
+          echo "::error::INCONCLUSIVE — harness could not reach a verdict; fix the harness."
+          exit 1
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -44,7 +58,7 @@ jobs:
           path: tmp/evidence/
 
   candidate:
-    name: candidate image (expect FIX VERIFIED)
+    name: candidate image fragment e2e
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: ${{ github.event.inputs.candidate_image != '' }}
@@ -58,11 +72,17 @@ jobs:
       - name: Run the e2e against ${{ github.event.inputs.candidate_image }}
         run: |
           CALICO_NODE_IMAGE='${{ github.event.inputs.candidate_image }}' bash scripts/run-e2e.sh all
-      - name: Verdict must be FIX VERIFIED
+      - name: Render the evidence report
+        if: always()
+        run: python3 evidence/render_report.py --dir tmp/evidence
+      - name: Write job summary
+        if: always()
+        run: cat tmp/evidence/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Verdict gate — candidate must deliver the full band (green)
         run: |
           V=$(python3 evidence/analyze.py --dir tmp/evidence | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])')
           echo "verdict: $V"
-          [ "$V" = "FIX VERIFIED" ] || { echo "::error::expected FIX VERIFIED, got $V"; exit 1; }
+          [ "$V" = "FIX VERIFIED" ] || { echo "::error::candidate image did NOT deliver the failure band (verdict: $V) — the fix is incomplete or absent. Evidence: summary + artifacts."; exit 1; }
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4

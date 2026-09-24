@@ -77,7 +77,15 @@ report = {
     "udp_fwd": [(r["size"], r["ok"]) for r in udp_fwd],
     "udp_rev": [(r["size"], r["ok"]) for r in udp_rev],
 }
-(EV / "report.json").write_text(json.dumps(report, indent=2))
+
+
+def write_report(verdict, problems=None):
+    out = dict(report)
+    out["verdict"] = verdict
+    if problems:
+        out["problems"] = problems
+    (EV / "report.json").write_text(json.dumps(out, indent=2))
+    return out
 
 problems = []
 if df.get("df_at_mtu", 0) != 1:
@@ -115,7 +123,7 @@ udp_fwd_fail = {s for s, ok in report["udp_fwd"] if not ok}
 udp_rev_fail = {s for s, ok in report["udp_rev"] if not ok}
 
 if problems:
-    print(json.dumps({"verdict": "INCONCLUSIVE", "problems": problems, "report": report}, indent=2))
+    print(json.dumps({"verdict": "INCONCLUSIVE", "problems": problems, "report": write_report("INCONCLUSIVE", problems)}, indent=2))
     raise SystemExit(2)
 
 delta = counters.get("too_short_after", 0) - counters.get("too_short_before", 0)
@@ -125,6 +133,7 @@ band_hits = len(fwd_fail | rev_fail)
 band_hits = len(udp_fwd_fail | udp_rev_fail)
 if band_hits > 0 and udp_fwd_fail | udp_rev_fail:
     consistent = fwd_fail == rev_fail and udp_fwd_fail == udp_fwd_fail  # noqa: F841
+    write_report("BUG REPRODUCED")
     print(json.dumps({
         "verdict": "BUG REPRODUCED",
         "failed_band_icmp": sorted(fwd_fail | rev_fail),
@@ -138,10 +147,10 @@ if band_hits > 0 and udp_fwd_fail | udp_rev_fail:
     raise SystemExit(0)
 
 if not fwd_fail and not rev_fail and not udp_fwd_fail and not udp_rev_fail:
-    print(json.dumps({"verdict": "FIX VERIFIED", "report": report}, indent=2))
+    print(json.dumps({"verdict": "FIX VERIFIED", "report": write_report("FIX VERIFIED")}, indent=2))
     raise SystemExit(0)
 
 print(json.dumps({"verdict": "INCONCLUSIVE", "problems": [
     f"mixed outcome: udp_fwd={sorted(udp_fwd_fail)} udp_rev={sorted(udp_rev_fail)}"
-], "report": report}, indent=2))
+], "report": write_report("INCONCLUSIVE", [f"mixed outcome: udp_fwd={sorted(udp_fwd_fail)} udp_rev={sorted(udp_rev_fail)}"])}, indent=2))
 raise SystemExit(2)

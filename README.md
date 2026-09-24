@@ -57,9 +57,14 @@ tails of 1, 4, 7 bytes (single fragment), control tail of exactly 8 bytes
 
 | Verdict | Meaning | CI |
 |---|---|---|
-| **BUG REPRODUCED** | failure band lost + control delivered + fragments on wire + counter delta matches | green (expected on stock) |
-| **FIX VERIFIED** | every size delivered byte-exact, both directions | green (candidate images) |
-| **INCONCLUSIVE** | anything else (control also lost, no fragments, counter mismatch) | **red** |
+| **BUG REPRODUCED** | failure band lost + control delivered + fragments on wire | **RED on purpose** — the public tracker of the bug; flips green when a stock image delivers the full band |
+| **FIX VERIFIED** | every size delivered byte-exact, both directions | **green** (candidate images; also green on stock once the fix lands upstream — then retire the check) |
+| **INCONCLUSIVE** | anything else (control also lost, no fragments, mixed shapes) | **red** — harness broken, neither verdict claimable |
+
+Every run renders a human-readable `REPORT.md` (what was sent, why each size
+was chosen, tail arithmetic, per-layer results) into the **job summary** and
+the evidence artifact — the raw JSONL is still there, but you never need to
+open it to understand the result.
 
 The harness never fakes a verdict: it can only distinguish the two clean
 outcomes; ambiguity fails the run.

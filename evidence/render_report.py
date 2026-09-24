@@ -63,11 +63,16 @@ verdict = report.get("verdict", "UNKNOWN")
 
 # ------------------------------------------------------------------ sizes
 # Re-derive the tail arithmetic for the table (sizes are MTU-derived).
+# Guards: empty/partial evidence (harness failed before sweeps) must render a
+# readable report, not crash.
 mtu = None
+boundary = None
 sizes = sorted({r["size"] for r in udp_fwd} or {r["size"] for r in icmp_fwd})
 if sizes:
-    boundary = max(s for s in sizes if s < 2 * min(sizes))  # biggest single-frag size
-    mtu = boundary + 20
+    single = [s for s in sizes if s < 2 * min(sizes)]
+    if single:
+        boundary = max(single)
+        mtu = boundary + 20
 
 
 rows = []
@@ -76,7 +81,9 @@ for r in udp_fwd + udp_rev:
     if r["size"] in seen:
         continue
     seen.add(r["size"])
-    b = boundary or 1480
+    if boundary is None:
+        continue
+    b = boundary
     # UDP probe payload is the whole datagram payload: IP total = size + 28.
     # The IP-layer payload that gets fragmented = size + 8 (UDP header).
     payload = r["size"] + 8
@@ -121,9 +128,10 @@ L.append("felix's tc BPF program on each pod veth (`FROM_WEP`) parses every "
 L.append("")
 L.append("## What was sent (all probes DF-OFF — fragmentation is the point)")
 L.append("")
-L.append(f"Pod MTU measured: **{mtu}** → per-fragment IP payload boundary: "
-         f"**{boundary}**. Sweep sizes are derived from it, so each packet "
-         "fragments AND the final fragment's tail lands exactly where we aim:")
+if boundary:
+    L.append(f"Pod MTU measured: **{mtu}** → per-fragment IP payload boundary: "
+             f"**{boundary}**. Sweep sizes are derived from it, so each packet "
+             "fragments AND the final fragment's tail lands exactly where we aim:")
 L.append("")
 L.append("| Payload size | Fragments | Last-fragment tail | In 1–7B bug band? | a→b delivered | b→a delivered |")
 L.append("|---|---|---|---|---|---|")

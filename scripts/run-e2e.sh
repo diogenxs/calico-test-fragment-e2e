@@ -117,7 +117,13 @@ cmd_deploy() {
             quay.io/calico/node:*) TAG="${CALICO_NODE_IMAGE##*:}" ;;
             *) die "candidate must be quay.io/calico/node:<tag> for now" ;;
         esac
-        log "candidate image: $CALICO_NODE_IMAGE (tag=$TAG)"
+        # ImageSet wants a digest; resolve the tag via the registry API
+        TOK="$(curl -s "https://quay.io/v2/auth?service=quay.io&scope=repository:calico/node:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+        DIGEST="$(curl -s -H "Authorization: Bearer $TOK" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+            -I "https://quay.io/v2/calico/node/manifests/$TAG" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2}')"
+        [ -n "$DIGEST" ] || die "could not resolve digest for $TAG"
+        log "candidate image: $CALICO_NODE_IMAGE (digest=$DIGEST)"
         kubectl patch installation default --type merge \
             -p "{\"spec\":{\"registry\":\"quay.io/\"}}" >/dev/null \
             || die "could not patch Installation.registry"
@@ -129,7 +135,7 @@ metadata:
 spec:
   images:
     - image: node
-      digest: ${TAG}
+      digest: ${DIGEST}
 IMGESET
         # the operator picks the LEXICOGRAPHICALLY HIGHEST ImageSet; make
         # ours unambiguous by deleting any default it created earlier

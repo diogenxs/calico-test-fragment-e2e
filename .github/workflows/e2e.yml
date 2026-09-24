@@ -57,6 +57,49 @@ jobs:
           name: evidence-stock
           path: tmp/evidence/
 
+  version-sweep:
+    name: version sweep (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Investigation job: does the short-tail fragment drop persist across
+    # calico versions (incl. unreleased master)? Dispatch from Actions tab.
+    if: ${{ github.event_name == 'workflow_dispatch' && !github.event.inputs.candidate_image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v3.29.7, v3.31.7, v3.32.2, master]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      - name: Run the e2e against calico ${{ matrix.version }}
+        run: |
+          if [ "${{ matrix.version }}" = "master" ]; then
+            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/master/manifests/tigera-operator.yaml"
+          else
+            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${{ matrix.version }}/manifests/tigera-operator.yaml"
+          fi
+          bash scripts/run-e2e.sh all
+      - name: Render the evidence report
+        if: always()
+        run: python3 evidence/render_report.py --dir tmp/evidence
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## calico ${{ matrix.version }}"
+            cat tmp/evidence/REPORT.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.version }}
+          path: tmp/evidence/
+
   candidate:
     name: candidate image fragment e2e
     runs-on: ubuntu-latest

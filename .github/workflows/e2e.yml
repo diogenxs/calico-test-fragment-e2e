@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [v3.30.7, v3.31.7, v3.32.2, master]
+        version: [v3.30.7, v3.31.7, v3.32.2, master-dev]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,14 +77,11 @@ jobs:
         run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
       - name: Run the e2e against calico ${{ matrix.version }}
         run: |
-          if [ "${{ matrix.version }}" = "master" ]; then
-            # master's tigera-operator.yaml ships without the CRDs (they live
-            # in manifests/operator/*.yaml there); concat operator + CRDs.
-            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/tigera-operator.yaml" -o /tmp/op.yaml
-            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/operator/crds.yaml" -o /tmp/crds.yaml || \
-            curl -sfL "https://raw.githubusercontent.com/projectcalico/calico/master/manifests/crds.yaml" -o /tmp/crds.yaml || true
-            cat /tmp/op.yaml /tmp/crds.yaml > /tmp/master-bundle.yaml
-            export OPERATOR_MANIFEST_URL="file:///tmp/master-bundle.yaml"
+          if [ "${{ matrix.version }}" = "master-dev" ]; then
+            # "master" proxy: latest v3.33 dev build of calico/node on quay,
+            # driven by the v3.32.2 operator (felix lives in calico-node).
+            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/tigera-operator.yaml"
+            export CALICO_NODE_IMAGE="quay.io/calico/node:v3.33.0-0.dev-1582-g0658150282ef"
           else
             export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${{ matrix.version }}/manifests/tigera-operator.yaml"
           fi

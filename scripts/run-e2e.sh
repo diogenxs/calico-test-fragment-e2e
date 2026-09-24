@@ -110,15 +110,30 @@ cmd_deploy() {
         || die "could not patch BGPPeer frr-tor peerIP"
 
     if [ -n "$CALICO_NODE_IMAGE" ]; then
-        # e.g. ghcr.io/org/calico-node:fix-frag -> registry ghcr.io/org/ + path node
-        # the operator resolves <registry>calico/node (imagePath unset). We accept
-        # full refs where the tail after the registry is calico/node[:tag].
-        REG="$(dirname "$(dirname "$CALICO_NODE_IMAGE")")"
-        TAG="$(echo "$CALICO_NODE_IMAGE" | awk -F: '{print $NF}')"
-        log "candidate image: $CALICO_NODE_IMAGE (registry=$REG tag=$TAG)"
+        # Pin the node image the way the operator natively supports: an
+        # ImageSet carrying the desired calico/node (and matching cni/typha)
+        # image paths, plus the registry override so paths resolve.
+        case "$CALICO_NODE_IMAGE" in
+            quay.io/calico/node:*) TAG="${CALICO_NODE_IMAGE##*:}" ;;
+            *) die "candidate must be quay.io/calico/node:<tag> for now" ;;
+        esac
+        log "candidate image: $CALICO_NODE_IMAGE (tag=$TAG)"
         kubectl patch installation default --type merge \
-            -p "{\"spec\":{\"registry\":\"$REG\"}}" >/dev/null \
-            || die "could not patch Installation.registry for the candidate image"
+            -p "{\"spec\":{\"registry\":\"quay.io/\"}}" >/dev/null \
+            || die "could not patch Installation.registry"
+        kubectl apply -f - <<IMGESET
+apiVersion: operator.tigera.io/v1
+kind: ImageSet
+metadata:
+  name: calico-${TAG}
+spec:
+  images:
+    - image: node
+      digest: ${TAG}
+IMGESET
+        # the operator picks the LEXICOGRAPHICALLY HIGHEST ImageSet; make
+        # ours unambiguous by deleting any default it created earlier
+        kubectl delete imageset calico-v3.32.2 --ignore-not-found >/dev/null 2>&1 || true
     fi
 
     log "waiting for tigera-operator deployment"

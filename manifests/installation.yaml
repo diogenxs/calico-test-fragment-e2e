@@ -34,3 +34,4 @@ metadata:
 spec:
   peerIP: ""   # patched to the FRR container IP at deploy time
   asNumber: 65001
+

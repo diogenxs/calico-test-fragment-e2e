@@ -1,0 +1,27 @@
+# tigera-operator chart values for the fragment e2e.
+# Only the Installation surface goes through the chart; BGPConfiguration /
+# BGPPeer are applied post-install by scripts/run-e2e.sh (the chart has no
+# custom-resources passthrough).
+installation:
+  enabled: true
+  variant: Calico
+  kubeletVolumePluginPath: "None"
+  calicoNetwork:
+    # BPF dataplane — required: the bug lives in felix's tc BPF programs on
+    # the pod veths (FROM_WEP). Iptables dataplane never exercises it.
+    linuxDataplane: BPF
+    bgp: Enabled
+    ipPools:
+      - cidr: 10.42.0.0/16
+        blockSize: 24
+        encapsulation: None
+# The chart renders APIServer/Goldmane/Whisker CRs at install time, which
+# races the CRD creation done by the operator pod on a fresh cluster
+# ("no matches for kind ... ensure CRDs are installed first"). None of these
+# components are needed for the fragment e2e — disable them.
+apiServer:
+  enabled: false
+goldmane:
+  enabled: false
+whisker:
+  enabled: false

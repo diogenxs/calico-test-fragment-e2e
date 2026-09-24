@@ -62,12 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Investigation job: does the short-tail fragment drop persist across
-    # calico versions (incl. unreleased master)? Dispatch from Actions tab.
+    # calico release versions? Each cell applies that release's own
+    # tigera-operator manifest. Dispatch from the Actions tab.
     if: ${{ github.event_name == 'workflow_dispatch' && !github.event.inputs.candidate_image }}
     strategy:
       fail-fast: false
       matrix:
-        version: [v3.30.7, v3.31.7, v3.32.2, master-dev]
+        version: [v3.30.7, v3.31.7, v3.32.2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,14 +78,7 @@ jobs:
         run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
       - name: Run the e2e against calico ${{ matrix.version }}
         run: |
-          if [ "${{ matrix.version }}" = "master-dev" ]; then
-            # "master" proxy: latest v3.33 dev build of calico/node on quay,
-            # driven by the v3.32.2 operator (felix lives in calico-node).
-            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/tigera-operator.yaml"
-            export CALICO_NODE_IMAGE="quay.io/calico/node:v3.33.0-0.dev-1582-g0658150282ef"
-          else
-            export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${{ matrix.version }}/manifests/tigera-operator.yaml"
-          fi
+          export OPERATOR_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${{ matrix.version }}/manifests/tigera-operator.yaml"
           bash scripts/run-e2e.sh all
       - name: Render the evidence report
         if: always()

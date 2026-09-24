@@ -21,6 +21,11 @@ NETSHOOT_IMAGE="docker.io/nicolaka/netshoot:latest"
 POD_NETWORK="10.42.0.0/16"
 SVC_NETWORK="10.43.0.0/16"
 BGP_AS="65001"
+# default: v3.32.2 manifest (proven path). Newer releases split the CRDs
+# out of this manifest, and the helm chart renders operator CRs at install
+# time — a chicken-egg that needs CRD pre-seeding the release no longer
+# ships. Manifest + operator-managed CRDs remains the reliable delivery.
+CALICO_CHART_VERSION="${CALICO_CHART_VERSION:-}"
 OPERATOR_MANIFEST_URL="${OPERATOR_MANIFEST_URL:-https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/tigera-operator.yaml}"
 CALICO_NODE_IMAGE="${CALICO_NODE_IMAGE:-}"   # empty = whatever stock the operator renders
 
@@ -88,7 +93,10 @@ cmd_deploy() {
     done
     docker exec frr-tor vtysh -c 'show bgp summary' >/dev/null 2>&1 || die "FRR bgpd did not come up"
 
-    log "applying stock tigera-operator manifest ($OPERATOR_MANIFEST_URL)"
+    # Version delivery: the release operator manifest. The operator pod
+    # creates/establishes its own CRDs at startup (manageCRDs), so we wait
+    # for them before applying the CR surface.
+    log "applying operator manifest ($OPERATOR_MANIFEST_URL)"
     case "$OPERATOR_MANIFEST_URL" in
         file://*) kubectl apply -f "${OPERATOR_MANIFEST_URL#file://}" >/dev/null ;;
         *)        kubectl apply -f "$OPERATOR_MANIFEST_URL" >/dev/null ;;
@@ -110,39 +118,32 @@ cmd_deploy() {
         || die "could not patch BGPPeer frr-tor peerIP"
 
     if [ -n "$CALICO_NODE_IMAGE" ]; then
-        # Pin the node image the way the operator natively supports: an
-        # ImageSet carrying the desired calico/node (and matching cni/typha)
-        # image paths, plus the registry override so paths resolve.
+        # Pin calico/node the operator-native way (see scripts/gen-imageset.py
+        # for the contract): ImageSet named after the operator's own version,
+        # calico/<name> keys, full component inventory, node overridden with
+        # the candidate digest.
         case "$CALICO_NODE_IMAGE" in
             quay.io/calico/node:*) TAG="${CALICO_NODE_IMAGE##*:}" ;;
             *) die "candidate must be quay.io/calico/node:<tag> for now" ;;
         esac
-        # ImageSet wants a digest; resolve the tag via the registry API
-        TOK="$(curl -s "https://quay.io/v2/auth?service=quay.io&scope=repository:calico/node:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
-        DIGEST="$(curl -s -H "Authorization: Bearer $TOK" \
-            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
-            -I "https://quay.io/v2/calico/node/manifests/$TAG" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2}')"
-        [ -n "$DIGEST" ] || die "could not resolve digest for $TAG"
-        log "candidate image: $CALICO_NODE_IMAGE (digest=$DIGEST)"
+        # Resolve the amd64 IMAGE digest (single-manifest Accept; the index
+        # digest's default entry fails exec on mismatched arch)
+        TOK="$(curl -s "https://quay.io/v2/auth?service=quay.io&scope=repository:calico/node:pull" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+        NODE_DIGEST="$(curl -s -H "Authorization: Bearer $TOK" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
+            -I "https://quay.io/v2/calico/node/manifests/$TAG" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2}')"
+        [ -n "$NODE_DIGEST" ] || die "could not resolve image digest for $TAG"
+        log "candidate image: $CALICO_NODE_IMAGE (digest=$NODE_DIGEST)"
         kubectl patch installation default --type merge \
             -p "{\"spec\":{\"registry\":\"quay.io/\"}}" >/dev/null \
             || die "could not patch Installation.registry"
-        kubectl apply -f - <<IMGESET
-apiVersion: operator.tigera.io/v1
-kind: ImageSet
-metadata:
-  name: calico-${TAG}
-spec:
-  images:
-    - image: node
-      digest: ${DIGEST}
-IMGESET
-        # the operator picks the LEXICOGRAPHICALLY HIGHEST ImageSet; make
-        # ours unambiguous by deleting any default it created earlier
-        kubectl delete imageset calico-v3.32.2 --ignore-not-found >/dev/null 2>&1 || true
+        python3 "$REPO_ROOT/scripts/gen-imageset.py" --node-digest "$NODE_DIGEST" \
+            | kubectl apply -f - || die "could not apply the candidate ImageSet"
     fi
 
-    log "waiting for tigera-operator deployment"
+log "waiting for tigera-operator deployment"
     kubectl -n tigera-operator wait --for=condition=Available deployment/tigera-operator --timeout=300s
     log "waiting for the calico-system namespace (operator creates it)"
     for _ in $(seq 1 60); do
